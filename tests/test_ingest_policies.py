@@ -22,9 +22,10 @@ def test_ingest_and_retrieve_with_fake_embeddings(tmp_path, policies_pdf):
     emb = FakeEmbeddings(size=32)
     ingest_policies(pdf_path=policies_pdf, chroma_dir=chroma, force=True, embeddings=emb)
     assert (chroma / ".ingested").exists()
+    marker = (chroma / ".ingested").read_text(encoding="utf-8").strip()
+    assert marker != ""
+    assert marker != "ok"  # fingerprint real
 
-    # FakeEmbeddings não ranqueia semanticamente; pedimos muitos chunks
-    # e validamos que o índice contém o conteúdo esperado do manual.
     result = search_policy_chunks(
         "horário de funcionamento",
         chroma_dir=chroma,
@@ -33,7 +34,7 @@ def test_ingest_and_retrieve_with_fake_embeddings(tmp_path, policies_pdf):
     )
     lowered = result.lower()
     assert "09:00" in result or "funcionamento" in lowered or "segunda" in lowered
-    assert "[" in result  # formato de trechos citáveis
+    assert "[" in result
 
 
 @pytest.mark.unit
@@ -47,4 +48,15 @@ def test_retrieve_arrependimento(tmp_path, policies_pdf):
         embeddings=emb,
         k=30,
     )
-    assert "7" in result or "arrependimento" in result.lower() or "devolução" in result.lower()
+    lowered = result.lower()
+    assert "7" in result or "arrependimento" in lowered or "devolução" in lowered
+
+
+@pytest.mark.unit
+def test_force_reingest_wipes(tmp_path, policies_pdf):
+    chroma = tmp_path / "chroma3"
+    emb = FakeEmbeddings(size=32)
+    ingest_policies(pdf_path=policies_pdf, chroma_dir=chroma, force=True, embeddings=emb)
+    ingest_policies(pdf_path=policies_pdf, chroma_dir=chroma, force=True, embeddings=emb)
+    result = search_policy_chunks("PIX", chroma_dir=chroma, embeddings=emb, k=20)
+    assert "[" in result

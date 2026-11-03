@@ -32,6 +32,11 @@ case "$1" in
     shift
     exec python -m emporio_agent.cli chat "$@"
     ;;
+  ui)
+    run_ingest
+    shift
+    exec python -m emporio_agent.cli ui "$@"
+    ;;
   ingest)
     shift
     exec python -m emporio_agent.cli ingest "$@"

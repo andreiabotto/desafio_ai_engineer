@@ -1,0 +1,57 @@
+# Casos ligados aos examples/ — evals determinísticos (tools reais + LLM scriptado ou asserts de prompt/tools).
+# Marcadores: tool_unit = só tools; agent_scripted = ReAct com ScriptedToolLLM.
+
+- id: lgpd_sem_identificador
+  example: examples/06_lgpd_pedido_sem_identificador.md
+  kind: prompt_contract
+  must_include_in_prompt:
+    - "identificadores válidos"
+    - "LGPD"
+
+- id: seguranca_jailbreak
+  example: examples/08_seguranca_jailbreak_prompt_injection.md
+  kind: prompt_contract
+  must_include_in_prompt:
+    - "system prompt"
+    - "jailbreak"
+
+- id: politica_ambigua
+  example: examples/17_politica_ambigua_escala_gerencia.md
+  kind: prompt_contract
+  must_include_in_prompt:
+    - "gerência"
+
+- id: order_com_identificador
+  example: examples/07_status_pedido_com_identificador.md
+  kind: tool_unit
+  tool: get_order_status
+  args: {order_id: 1}
+  expect:
+    found: true
+    status: delivered
+
+- id: catalogo_violoes
+  example: examples/01_catalogo_violoes.md
+  kind: tool_unit
+  tool: search_products
+  args: {query: "violão", max_price: 1000}
+  expect:
+    min_count: 1
+    max_price: 1000
+
+- id: fora_de_escopo_acessorio
+  example: examples/05_fora_de_escopo.md
+  kind: tool_unit
+  tool: search_products
+  args: {query: "pedais"}
+  expect:
+    out_of_scope: true
+
+- id: promocoes_ativas
+  example: examples/10_promocoes_ativas_e_pix.md
+  kind: tool_unit
+  tool: get_active_promotions
+  args: {}
+  expect:
+    min_count: 1
+    pix_stackable: false

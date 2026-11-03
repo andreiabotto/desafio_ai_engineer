@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.tools import tool
 
+from emporio_agent.config import get_settings
 from emporio_agent.data.ingest_policies import search_policy_chunks
 
 _active_chroma: Path | None = None
@@ -29,9 +30,10 @@ def search_policies(query: str) -> str:
 
     Use para horário, endereço, pagamento, trocas/devoluções, frete, garantia, LGPD e tom de atendimento.
     """
+    cfg = get_settings()
     return search_policy_chunks(
         query,
         chroma_dir=_active_chroma,
         embeddings=_active_embeddings,
-        k=8 if _active_embeddings is not None else None,
+        k=cfg.rag_top_k,
     )

@@ -6,8 +6,8 @@ services:
       - .env
     environment:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
     volumes:
       - ./.data:/app/.data
       - ./.chroma:/app/.chroma
@@ -15,6 +15,29 @@ services:
     stdin_open: true
     tty: true
     command: ["chat"]
+
+  ui:
+    build: .
+    image: emporio-agent:local
+    env_file:
+      - .env
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./.data:/app/.data
+      - ./.chroma:/app/.chroma
+      - huggingface-cache:/app/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    command: ["ui", "--port", "8501"]
 
   test:
     profiles: ["test"]

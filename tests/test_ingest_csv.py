@@ -58,3 +58,14 @@ def test_reingest_idempotent(tmp_path):
     ingest_csvs(db_path=db)
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 65
+
+
+@pytest.mark.unit
+def test_ingest_has_search_and_unit_price(temp_db):
+    with sqlite3.connect(temp_db) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(products)").fetchall()}
+        item_cols = {r[1] for r in conn.execute("PRAGMA table_info(order_items)").fetchall()}
+        cust_cols = {r[1] for r in conn.execute("PRAGMA table_info(customers)").fetchall()}
+    assert "name_search" in cols
+    assert "unit_price_brl" in item_cols
+    assert "phone_digits" in cust_cols
