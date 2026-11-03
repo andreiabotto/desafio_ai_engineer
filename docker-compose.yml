@@ -1,0 +1,31 @@
+services:
+  agent:
+    build: .
+    image: emporio-agent:local
+    env_file:
+      - .env
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    volumes:
+      - ./.data:/app/.data
+      - ./.chroma:/app/.chroma
+      - huggingface-cache:/app/.cache/huggingface
+    stdin_open: true
+    tty: true
+    command: ["chat"]
+
+  test:
+    profiles: ["test"]
+    build: .
+    image: emporio-agent:local
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-dummy}
+    volumes:
+      - huggingface-cache:/app/.cache/huggingface
+    entrypoint: ["pytest"]
+    command: ["-m", "unit or integration", "-q"]
+
+volumes:
+  huggingface-cache:
