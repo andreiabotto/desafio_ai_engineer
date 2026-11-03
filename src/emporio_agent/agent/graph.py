@@ -7,33 +7,20 @@ from typing import Any, Sequence
 
 from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
+from emporio_agent.agent.errors import AgentError, classify_llm_error, map_exception
 from emporio_agent.agent.prompts import SYSTEM_PROMPT
 from emporio_agent.config import Settings, get_settings
+from emporio_agent.logging_setup import get_logger
 from emporio_agent.tools import ALL_TOOLS
+from emporio_agent.tools.datetime_tool import format_store_clock_context
 
+# Re-export para imports legados (`from emporio_agent.agent.graph import AgentAPIError`)
+AgentAPIError = AgentError
 
-class AgentAPIError(RuntimeError):
-    """Falha na chamada ao LLM/API, com classificação para UI/CLI."""
-
-    def __init__(self, message: str, *, kind: str = "unknown") -> None:
-        super().__init__(message)
-        self.kind = kind
-
-
-def classify_llm_error(exc: BaseException) -> str:
-    text = f"{type(exc).__name__}: {exc}".lower()
-    if any(x in text for x in ("429", "rate limit", "rate_limit", "tpm", "too many requests")):
-        return "rate_limit"
-    if any(x in text for x in ("401", "403", "invalid api", "authentication", "unauthorized")):
-        return "auth"
-    if any(x in text for x in ("timeout", "timed out", "deadline")):
-        return "timeout"
-    if any(x in text for x in ("context length", "maximum context", "token")):
-        return "context"
-    return "unknown"
+logger = get_logger(__name__)
 
 
 def build_llm(settings: Settings | None = None, llm: BaseChatModel | None = None) -> BaseChatModel:
@@ -41,9 +28,13 @@ def build_llm(settings: Settings | None = None, llm: BaseChatModel | None = None
         return llm
     cfg = settings or get_settings()
     if not cfg.groq_api_key:
-        raise ValueError(
-            "GROQ_API_KEY não configurada. Crie um arquivo .env a partir de .env.example "
-            "com sua chave gratuita de https://console.groq.com"
+        raise AgentError(
+            kind="config",
+            message=(
+                "Falta configuração para eu funcionar (GROQ_API_KEY). "
+                "Crie um arquivo .env a partir de .env.example com a chave de "
+                "https://console.groq.com — detalhes no README."
+            ),
         )
     return ChatGroq(
         model=cfg.groq_model,
@@ -94,14 +85,19 @@ def run_agent_turn(
     verbose: bool = False,
     settings: Settings | None = None,
 ) -> tuple[str, list[BaseMessage]]:
-    """Executa um turno e devolve (resposta_texto, mensagens_atualizadas)."""
+    """Executa um turno e devolve (resposta_texto, mensagens_atualizadas).
+
+    Falhas conhecidas da API/modelo são mapeadas no core para `AgentError`
+    com mensagem personalizada — interfaces só exibem `error.message`.
+    """
     cfg = settings or get_settings()
     text = (user_message or "").strip()
     if len(text) > cfg.max_user_input_chars:
         text = text[: cfg.max_user_input_chars]
 
     prior = list(history or [])
-    inputs = {"messages": prior + [HumanMessage(content=text)]}
+    clock_ctx = SystemMessage(content=format_store_clock_context())
+    inputs = {"messages": prior + [clock_ctx, HumanMessage(content=text)]}
     # recursion_limit ≈ 2 * tool rounds + margem (modelo ↔ tools)
     recursion_limit = max(8, cfg.max_tool_rounds * 2 + 4)
     invoke_config = {"recursion_limit": recursion_limit}
@@ -113,16 +109,27 @@ def run_agent_turn(
         try:
             result = agent.invoke(inputs, config=invoke_config)
             break
+        except AgentError:
+            raise
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
             kind = classify_llm_error(exc)
-            if kind != "rate_limit" or attempt >= attempts - 1:
-                raise AgentAPIError(str(exc), kind=kind) from exc
-            time.sleep(1.5 * (2**attempt))
+            logger.warning(
+                "Falha no turno do agente (attempt=%s/%s kind=%s): %s",
+                attempt + 1,
+                attempts,
+                kind,
+                exc,
+            )
+            # Retry só para rate limit / timeout / instabilidade transitória
+            if kind in {"rate_limit", "timeout", "server", "connection"} and attempt < attempts - 1:
+                time.sleep(1.5 * (2**attempt))
+                continue
+            raise map_exception(exc) from exc
 
     if result is None:
         assert last_exc is not None
-        raise AgentAPIError(str(last_exc), kind=classify_llm_error(last_exc)) from last_exc
+        raise map_exception(last_exc) from last_exc
 
     messages: list[BaseMessage] = result["messages"]
 
@@ -131,9 +138,9 @@ def run_agent_turn(
             role = msg.__class__.__name__
             preview = str(getattr(msg, "content", ""))[:240]
             tool_calls = getattr(msg, "tool_calls", None)
-            print(f"[{role}] {preview}")
+            logger.info("[%s] %s", role, preview)
             if tool_calls:
-                print(f"  tool_calls={tool_calls}")
+                logger.info("  tool_calls=%s", tool_calls)
 
     answer = _extract_final_text(messages)
     return answer, messages

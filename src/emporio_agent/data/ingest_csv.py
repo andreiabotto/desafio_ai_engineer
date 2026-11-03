@@ -10,7 +10,10 @@ from pathlib import Path
 import pandas as pd
 
 from emporio_agent.config import CSV_FILES, DB_PATH, ensure_runtime_dirs
+from emporio_agent.logging_setup import get_logger, setup_logging
 from emporio_agent.textnorm import digits_only, strip_accents
+
+logger = get_logger(__name__)
 
 
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
@@ -158,5 +161,6 @@ def db_ready(db_path: Path | None = None, csv_files: dict[str, Path] | None = No
 
 
 if __name__ == "__main__":
+    setup_logging()
     out = ingest_csvs()
-    print(f"SQLite pronto em {out}")
+    logger.info("SQLite pronto em %s", out)

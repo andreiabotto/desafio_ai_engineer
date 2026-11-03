@@ -25,10 +25,10 @@
   example: examples/07_status_pedido_com_identificador.md
   kind: tool_unit
   tool: get_order_status
-  args: {order_id: 1}
+  args: {tracking_code: BRJL5544332BR}
   expect:
     found: true
-    status: delivered
+    status: shipped
 
 - id: catalogo_violoes
   example: examples/01_catalogo_violoes.md

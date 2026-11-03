@@ -4,24 +4,14 @@ from __future__ import annotations
 
 import streamlit as st
 
-from emporio_agent.agent.graph import AgentAPIError, run_agent_turn
+from emporio_agent.agent.errors import AgentError, map_exception
+from emporio_agent.agent.graph import run_agent_turn
 from emporio_agent.agent.memory import ConversationMemory
 from emporio_agent.bootstrap import bootstrap_agent
 from emporio_agent.config import get_settings
+from emporio_agent.logging_setup import get_logger, setup_logging
 
-
-def _friendly_error(exc: BaseException) -> str:
-    kind = getattr(exc, "kind", "unknown") if isinstance(exc, AgentAPIError) else "unknown"
-    if kind == "rate_limit":
-        return (
-            "Não consegui responder agora (rate limit do Groq). "
-            "Aguarde alguns segundos ou inicie uma nova conversa."
-        )
-    if kind == "auth":
-        return "Falha de autenticação na API. Verifique a GROQ_API_KEY no `.env`."
-    if kind == "context":
-        return "A conversa ficou longa demais para o modelo. Inicie uma nova conversa."
-    return "Não consegui responder agora. Tente de novo em instantes ou inicie uma nova conversa."
+logger = get_logger(__name__)
 
 SUGGESTIONS = [
     "Quais violões até R$ 1000?",
@@ -57,14 +47,28 @@ def _inject_styles() -> None:
           font-family: "Source Sans 3", "Segoe UI", sans-serif !important;
         }
 
-        /* Área principal: texto escuro legível */
-        section.main, section[data-testid="stMain"],
+        /* Área principal: texto escuro legível (legado + Streamlit moderno) */
+        section.main, section[data-testid="stMain"], .stMain,
         section.main p, section.main li, section.main span,
         section.main label, section.main h1, section.main h2,
         section.main h3, section.main h4, section.main strong,
         section.main .stMarkdown, section.main .stMarkdown p,
         section.main [data-testid="stMarkdownContainer"],
-        section.main [data-testid="stMarkdownContainer"] * {
+        section.main [data-testid="stMarkdownContainer"] *,
+        section[data-testid="stMain"] p, section[data-testid="stMain"] li,
+        section[data-testid="stMain"] span, section[data-testid="stMain"] label,
+        section[data-testid="stMain"] h1, section[data-testid="stMain"] h2,
+        section[data-testid="stMain"] h3, section[data-testid="stMain"] h4,
+        section[data-testid="stMain"] strong,
+        section[data-testid="stMain"] .stMarkdown,
+        section[data-testid="stMain"] .stMarkdown p,
+        section[data-testid="stMain"] [data-testid="stMarkdownContainer"],
+        section[data-testid="stMain"] [data-testid="stMarkdownContainer"] *,
+        .stMain p, .stMain li, .stMain span, .stMain label,
+        .stMain h1, .stMain h2, .stMain h3, .stMain h4, .stMain strong,
+        .stMain .stMarkdown, .stMain .stMarkdown p,
+        .stMain [data-testid="stMarkdownContainer"],
+        .stMain [data-testid="stMarkdownContainer"] * {
           color: var(--ink) !important;
         }
 
@@ -102,18 +106,32 @@ def _inject_styles() -> None:
 
         [data-testid="stChatMessage"] {
           background: var(--panel) !important;
-          border: 1px solid rgba(15, 61, 46, 0.12);
+          border: 1px solid rgba(15, 61, 46, 0.18);
           border-radius: 14px;
           padding: 0.5rem 0.75rem;
           color: var(--ink) !important;
+          min-width: 0;
+          max-width: 100%;
         }
         [data-testid="stChatMessage"] * {
           color: var(--ink) !important;
+        }
+        [data-testid="stChatMessage"] [data-testid="stChatMessageContent"],
+        [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"],
+        [data-testid="stChatMessage"] p,
+        [data-testid="stChatMessage"] li {
+          min-width: 0;
+          max-width: 100%;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          white-space: normal;
         }
         [data-testid="stChatMessage"] code,
         [data-testid="stChatMessage"] pre {
           color: var(--ink) !important;
           background: #eef2f0 !important;
+          overflow-wrap: anywhere;
+          word-break: break-word;
         }
         [data-testid="stChatMessage"] table,
         [data-testid="stChatMessage"] th,
@@ -122,27 +140,50 @@ def _inject_styles() -> None:
           border-color: rgba(28, 36, 32, 0.18) !important;
         }
 
-        /* Sugestões / botões da área principal */
-        section.main .stButton > button {
+        /* Sugestões / botões — cobrir Streamlit moderno (stMain) e legado (.main) */
+        section.main .stButton > button,
+        section[data-testid="stMain"] .stButton > button,
+        .stMain .stButton > button {
           background: #ffffff !important;
           color: #0f3d2e !important;
           border: 1px solid rgba(15, 61, 46, 0.28) !important;
           font-weight: 600 !important;
         }
-        section.main .stButton > button:hover {
+        section.main .stButton > button:hover,
+        section[data-testid="stMain"] .stButton > button:hover,
+        .stMain .stButton > button:hover {
           background: #e4f0ea !important;
           border-color: #0f3d2e !important;
           color: #0f3d2e !important;
         }
         section.main .stButton > button p,
-        section.main .stButton > button span {
+        section.main .stButton > button span,
+        section.main .stButton > button div,
+        section[data-testid="stMain"] .stButton > button p,
+        section[data-testid="stMain"] .stButton > button span,
+        section[data-testid="stMain"] .stButton > button div,
+        .stMain .stButton > button p,
+        .stMain .stButton > button span,
+        .stMain .stButton > button div,
+        section.main .stButton > button [data-testid="stMarkdownContainer"],
+        section.main .stButton > button [data-testid="stMarkdownContainer"] *,
+        section[data-testid="stMain"] .stButton > button [data-testid="stMarkdownContainer"],
+        section[data-testid="stMain"] .stButton > button [data-testid="stMarkdownContainer"] *,
+        .stMain .stButton > button [data-testid="stMarkdownContainer"],
+        .stMain .stButton > button [data-testid="stMarkdownContainer"] * {
           color: #0f3d2e !important;
         }
 
+        [data-testid="stChatInput"] {
+          background: var(--panel) !important;
+          border: 1px solid rgba(15, 61, 46, 0.22) !important;
+          border-radius: 12px !important;
+        }
         [data-testid="stChatInput"] textarea,
         [data-testid="stChatInput"] input {
           color: var(--ink) !important;
           caret-color: var(--ink) !important;
+          background: transparent !important;
         }
         [data-testid="stChatInput"] textarea::placeholder {
           color: var(--muted) !important;
@@ -184,6 +225,7 @@ def _inject_styles() -> None:
 @st.cache_resource(show_spinner=False)
 def _load_runtime():
     settings = get_settings()
+    setup_logging(settings.log_level)
     logs: list[str] = []
     agent, cfg = bootstrap_agent(settings=settings, log=logs.append)
     return agent, cfg, logs
@@ -222,7 +264,9 @@ def main() -> None:
         try:
             agent, cfg, boot_logs = _load_runtime()
         except Exception as exc:  # noqa: BLE001
-            st.error(f"Falha ao iniciar o agente: {exc}")
+            err = map_exception(exc)
+            logger.exception("Falha ao iniciar o agente (kind=%s)", err.kind)
+            st.error(err.message)
             st.stop()
 
     _ensure_session(cfg.max_history_messages)
@@ -304,9 +348,14 @@ def main() -> None:
                     )
                     if used:
                         st.caption("Tools: " + ", ".join(used))
-            except Exception as exc:  # noqa: BLE001
-                answer = _friendly_error(exc)
+            except AgentError as exc:
+                logger.warning("Erro no turno (kind=%s)", exc.kind)
+                answer = exc.message
                 # Não altera memory/ui_messages em falha — evita dessincronizar histórico
+            except Exception as exc:  # noqa: BLE001
+                err = map_exception(exc)
+                logger.exception("Erro inesperado no turno (kind=%s)", err.kind)
+                answer = err.message
         st.markdown(answer)
 
 

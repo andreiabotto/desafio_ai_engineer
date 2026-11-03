@@ -11,12 +11,16 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from emporio_agent.agent.graph import AgentAPIError, run_agent_turn
+from emporio_agent.agent.errors import AgentError, map_exception
+from emporio_agent.agent.graph import run_agent_turn
 from emporio_agent.agent.memory import ConversationMemory
 from emporio_agent.bootstrap import bootstrap_agent, ensure_data_ready
+from emporio_agent.config import get_settings
+from emporio_agent.logging_setup import get_logger, setup_logging
 
 app = typer.Typer(add_completion=False, no_args_is_help=False, invoke_without_command=True)
 console = Console()
+logger = get_logger(__name__)
 
 _HELP = """
 Comandos:
@@ -26,30 +30,19 @@ Comandos:
 """.strip()
 
 
-def _format_api_error(exc: BaseException) -> str:
-    kind = getattr(exc, "kind", "unknown") if isinstance(exc, AgentAPIError) else "unknown"
-    base = f"[red]Erro ao consultar o modelo/API:[/red] {exc}"
-    if kind == "rate_limit":
-        return (
-            f"{base}\n"
-            "[dim]Rate limit / TPM do Groq: aguarde uns segundos, use /nova "
-            "para limpar o histórico, ou tente de novo.[/dim]"
-        )
-    if kind == "auth":
-        return f"{base}\n[dim]Verifique GROQ_API_KEY no arquivo .env.[/dim]"
-    if kind == "context":
-        return f"{base}\n[dim]Contexto longo demais — use /nova e tente uma pergunta mais curta.[/dim]"
-    return f"{base}\n[dim]Se persistir, confira rede, .env e logs com --verbose.[/dim]"
-
-
 def run_chat(verbose: bool = False, reingest: bool = False) -> None:
+    settings = get_settings()
+    setup_logging("DEBUG" if verbose else settings.log_level)
     try:
         agent, settings = bootstrap_agent(
+            settings=settings,
             force=reingest,
             log=lambda msg: console.print(f"[cyan]{msg}[/cyan]"),
         )
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Falha ao iniciar o agente:[/red] {exc}")
+        err = map_exception(exc)
+        logger.exception("Falha ao iniciar o agente (kind=%s)", err.kind)
+        console.print(f"[red]{err.message}[/red]")
         raise typer.Exit(code=1) from exc
 
     memory = ConversationMemory(max_messages=settings.max_history_messages)
@@ -93,8 +86,13 @@ def run_chat(verbose: bool = False, reingest: bool = False) -> None:
             console.print()
             console.print(Markdown(answer))
             console.print()
+        except AgentError as exc:
+            logger.warning("Erro no turno (kind=%s)", exc.kind)
+            console.print(f"\n[yellow]{exc.message}[/yellow]\n")
         except Exception as exc:  # noqa: BLE001
-            console.print(_format_api_error(exc))
+            err = map_exception(exc)
+            logger.exception("Erro inesperado no turno (kind=%s)", err.kind)
+            console.print(f"\n[yellow]{err.message}[/yellow]\n")
 
 
 @app.callback(invoke_without_command=True)
@@ -121,7 +119,9 @@ def ui_cmd(
     port: int = typer.Option(8501, "--port", "-p", help="Porta do Streamlit"),
 ) -> None:
     """Abre a interface gráfica (Streamlit) do chat."""
+    setup_logging(get_settings().log_level)
     app_path = Path(__file__).resolve().parent / "ui" / "app.py"
+    logger.info("Abrindo UI em http://localhost:%s", port)
     console.print(f"[cyan]Abrindo UI em http://localhost:{port} ...[/cyan]")
     raise SystemExit(
         subprocess.call(
@@ -145,11 +145,13 @@ def ingest_cmd(
     force: bool = typer.Option(False, "--force", help="Recria SQLite e índice Chroma"),
 ) -> None:
     """Executa apenas a ingestão de CSVs e políticas."""
+    setup_logging(get_settings().log_level)
     ensure_data_ready(
         force=force,
         log=lambda msg: console.print(f"[cyan]{msg}[/cyan]"),
         load_embeddings=False,
     )
+    logger.info("Ingestão concluída")
     console.print("[green]Ingestão concluída.[/green]")
 
 

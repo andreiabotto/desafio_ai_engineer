@@ -31,6 +31,8 @@ def get_order_status(
     """Consulta status de pedido por order_id, código de rastreio, e-mail ou telefone do cliente.
 
     Informe ao menos um identificador. Se informar vários, TODOS precisam bater (AND).
+    order_id sozinho NÃO autoriza (enumerável): combine com email ou telefone da compra.
+    tracking_code sozinho autoriza. email/telefone sozinhos listam com nome mascarado.
     Não invente status — use apenas o retorno desta tool.
     E-mail e telefone NÃO são devolvidos no JSON (LGPD / minimização).
     """
@@ -39,6 +41,20 @@ def get_order_status(
             {
                 "found": False,
                 "message": "Informe order_id, tracking_code, email ou telefone para localizar o pedido.",
+            },
+            ensure_ascii=False,
+        )
+
+    # order_id é enumerável — exige segundo fator (email/telefone) ou tracking
+    if order_id is not None and not any([tracking_code, email, phone]):
+        return json.dumps(
+            {
+                "found": False,
+                "message": (
+                    "Por privacidade, o número do pedido sozinho não basta. "
+                    "Informe também o e-mail ou telefone cadastrado na compra "
+                    "(ou o código de rastreio)."
+                ),
             },
             ensure_ascii=False,
         )

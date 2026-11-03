@@ -6,16 +6,36 @@ from emporio_agent.tools.orders import get_order_status
 
 
 @pytest.mark.unit
-def test_order_by_id(temp_db):
-    raw = get_order_status.invoke({"order_id": 1})
+def test_order_id_alone_rejected(temp_db):
+    raw = get_order_status.invoke({"order_id": 5})
+    data = json.loads(raw)
+    assert data["found"] is False
+    assert "sozinho" in data["message"].lower() or "privacidade" in data["message"].lower()
+
+
+@pytest.mark.unit
+def test_order_by_id_with_owner_email(temp_db):
+    raw = get_order_status.invoke(
+        {"order_id": 1, "email": "pedro.oliveira@jmail.com"}
+    )
     data = json.loads(raw)
     assert data["found"] is True
     assert data["orders"][0]["order_id"] == 1
     assert data["orders"][0]["tracking_code"].startswith("BR")
-    assert "customer_name" in data["orders"][0]
+    assert data["orders"][0]["customer_name"] == "Pedro Henrique Oliveira"
     assert "email" not in data["orders"][0]
     assert "phone" not in data["orders"][0]
     assert "unit_price_brl" in data["orders"][0]["items"][0]
+
+
+@pytest.mark.unit
+def test_order_id_with_mismatched_email_rejected(temp_db):
+    # Ana Carol + pedido 1 (Pedro) → AND rejeita
+    raw = get_order_status.invoke(
+        {"order_id": 1, "email": "anacarol.ferreira@coldmail.com"}
+    )
+    data = json.loads(raw)
+    assert data["found"] is False
 
 
 @pytest.mark.unit
@@ -75,6 +95,18 @@ def test_order_and_identifiers(temp_db):
 
 @pytest.mark.unit
 def test_order_not_found(temp_db):
-    raw = get_order_status.invoke({"order_id": 99999})
+    raw = get_order_status.invoke(
+        {"order_id": 99999, "email": "lucas.mendes@jmail.com"}
+    )
     data = json.loads(raw)
     assert data["found"] is False
+
+
+@pytest.mark.unit
+def test_order_id_with_tracking_allowed(temp_db):
+    raw = get_order_status.invoke(
+        {"order_id": 1, "tracking_code": "BRAB1234567BR"}
+    )
+    data = json.loads(raw)
+    assert data["found"] is True
+    assert data["orders"][0]["order_id"] == 1

@@ -83,3 +83,5 @@ def test_datetime_tool_shape():
     assert "timezone" in data
     assert "weekday" in data
     assert "time" in data
+    assert "is_open_now" in data
+    assert isinstance(data["is_open_now"], bool)

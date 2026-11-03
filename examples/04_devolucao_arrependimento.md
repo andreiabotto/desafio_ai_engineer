@@ -15,13 +15,13 @@ Sim — para **compras online**, vale o direito de arrependimento:
 - Reembolso na mesma forma de pagamento em até **10 dias úteis**
 - Frete de devolução por conta da loja nesse caso
 
-Se você me passar o **número do pedido**, e-mail ou código de rastreio, eu confiro o status e a data de entrega para ver se ainda está no prazo.
+Se você me passar o **código de rastreio**, ou o **número do pedido + e-mail/telefone** da compra, eu confiro o status. Usamos a data/hora atual da loja e a estimativa de entrega (quando `delivered`) para orientar o prazo — sem data real de recebimento no sistema, aviso essa limitação.
 
-**Cliente:** Pode olhar o pedido 1?
+**Cliente:** Pode olhar o pedido 1? Meu e-mail é pedro.oliveira@jmail.com
 
-**Agente:** (consulta `get_order_status` com order_id=1)
+**Agente:** (consulta `get_order_status` com order_id=1 e email; usa contexto temporal injetado)
 
-O pedido **1** está como **delivered**, com rastreio `BRAB1234567BR`. Com a data de entrega/estimativa do sistema, consigo orientar se o prazo de 7 dias ainda se aplica — se já passou, ainda podemos avaliar troca por defeito (até 30 dias) conforme a política.
+O pedido **1** está como **delivered**, com rastreio `BRAB1234567BR` e estimativa de entrega em 25/10/2025. Com a data de hoje no fuso da loja, oriento se os 7 dias corridos ainda fariam sentido a partir dessa estimativa — se já passou, ainda podemos avaliar troca por defeito (até 30 dias) conforme a política.
 
 ## Requisitos cobertos
 

@@ -8,9 +8,9 @@ O agente combina **tool calling** (dados operacionais em SQLite) com **RAG** (ma
 
 - Persona alinhada ao tom da loja (informal-profissional)
 - Consulta de catálogo, preços, estoque e promoções ativas
-- Status de pedido por `order_id`, rastreio, e-mail ou telefone (LGPD minimizado)
+- Status de pedido por rastreio, e-mail/telefone, ou `order_id` **+** e-mail/telefone (LGPD na tool)
 - Políticas: horário, endereço, pagamento, trocas/devoluções, frete, garantia, LGPD
-- Data/hora da loja (`get_current_datetime`) para “estamos abertos agora?”
+- Data/hora da loja injetada em cada turno + `get_current_datetime` (`is_open_now`)
 - Recusa educada de pedidos fora de escopo (acessórios), com gate na tool de catálogo
 - Histórico de conversa na sessão com resumo dos fatos das tools
 - Interface gráfica com Streamlit
@@ -25,7 +25,7 @@ Usuário (CLI ou Streamlit)
         → Groq openai/gpt-oss-120b
         → Tools → SQLite (CSVs)
         → Tool RAG → Chroma + sentence-transformers multilingual (local)
-        → get_current_datetime (America/Campo_Grande)
+        → contexto temporal por turno + get_current_datetime (America/Campo_Grande)
 ```
 
 ## Stack
@@ -106,13 +106,38 @@ docker compose up --build agent
 docker compose up --build ui
 ```
 
-A primeira subida baixa o modelo de embeddings e indexa as políticas (pode demorar). Volumes persistem SQLite (`.data/`), Chroma (`.chroma/`) e cache HuggingFace. A imagem roda como usuário não-root.
+A primeira subida baixa o modelo de embeddings e indexa as políticas (pode demorar). Volumes persistem SQLite (`.data/`), Chroma (`.chroma/`) e cache HuggingFace. A imagem roda como usuário não-root. Logs de ingestão/bootstrap vão para stderr via `logging` (`LOG_LEVEL=INFO` por padrão) — use `docker compose logs -f ui`.
 
 Rodar testes no container:
 
 ```bash
 docker compose run --rm test
 ```
+
+## Erros conhecidos (API / modelo)
+
+O mapeamento fica no **core** ([`src/emporio_agent/agent/errors.py`](src/emporio_agent/agent/errors.py)): exceções Groq/LangGraph viram `AgentError(kind, message)` com texto amigável. CLI e Streamlit só exibem `error.message` — não duplicam o `if kind == ...`.
+
+| `kind` | Causa típica | O que o core faz | O que você pode fazer |
+|--------|--------------|------------------|------------------------|
+| `rate_limit` | 429 / TPM do free tier Groq | Retry com backoff (`LLM_MAX_RETRIES`) | Aguardar; `/nova` ou “Nova conversa”; reduzir histórico; **fallback de modelo** (abaixo) |
+| `auth` | chave inválida / 401–403 | Sem retry | Conferir `GROQ_API_KEY` no `.env` |
+| `timeout` / `connection` / `server` | rede ou instabilidade | Retry com backoff | Tentar de novo; checar rede |
+| `context` | conversa / prompt longo demais | Sem retry | Nova conversa + pergunta mais curta |
+| `recursion` | muitas idas a tools | Sem retry | Pergunta mais direta |
+| `config` | `GROQ_API_KEY` ausente | Falha na subida | Copiar `.env.example` → `.env` |
+| `unknown` | demais falhas | Loga detalhe em stderr | `LOG_LEVEL=DEBUG` e inspecionar `docker compose logs` |
+
+**Fallback de modelo (operacional):** se o rate limit persistir no free tier, troque temporariamente no `.env`:
+
+```bash
+# exemplos no catálogo Groq (latência/TPM variam)
+GROQ_MODEL=llama-3.1-8b-instant
+# ou
+GROQ_MODEL=openai/gpt-oss-120b
+```
+
+Reinicie o container/`ui` após alterar. O core já faz retry; o fallback de modelo é escolha operacional (não há troca automática no código para manter o comportamento previsível na demo).
 
 ## Testes
 
@@ -164,19 +189,20 @@ docker-compose.yml
 4. **Embeddings multilingual locais** — melhor fit PT-BR sem segunda API paga; trade-off: imagem/cache maiores.
 5. **SQLite** — zero infra; fingerprint dos CSVs invalida ingestão stale; snapshot de `unit_price_brl` nos itens.
 6. **Memória compacta** — remove traces brutos de tools (TPM) mas mantém um `SystemMessage` com fatos resumidos.
-7. **LGPD na tool** — identificadores com AND; telefone exato; e-mail/telefone nunca no JSON; nome mascarado sem order_id/tracking.
+7. **LGPD na tool** — identificadores com AND; `order_id` sozinho rejeitado (dual-factor); tracking sozinho ok; telefone exato; e-mail/telefone nunca no JSON; nome mascarado sem order_id/tracking.
 8. **Testes em camadas** — tools sem LLM; agente com LLM fake; evals dos examples; live opcional.
 
 ## Limitações e próximos passos
 
 - Rate limits do tier gratuito Groq podem exigir espera/retry (há backoff básico)
 - Match de produto é substring com fold de acentos (não fuzzy/FTS completo)
-- Identificação de pedido = posse do identificador (não é autenticação real / OTP)
+- Identificação de pedido = posse de identificador(es) (não é autenticação real / OTP); `order_id` enumerável exige segundo fator
+- Sem `delivered_at` nos CSVs — prazos de devolução usam estimativa + disclaimer quando `delivered`
 - `unit_price_brl` é snapshot do catálogo na ingestão — o CSV de itens não traz preço histórico real
 - RAG: chunking por seção + sub-chunk; CI de políticas usa FakeEmbeddings (ranking semântico não é gate de CI)
 - Examples em `examples/` são **roteiros esperados**, não dumps verbatim de CLI
 - Sem canal WhatsApp; evals online com juiz LLM ficam como evolução
-- UI Streamlit sem autenticação de acesso (adequado a demo local)
+- UI Streamlit light branded (CSS endurecido contra vazamento do tema escuro do SO); sem autenticação de acesso
 
 ## Exemplos de interação
 
@@ -211,7 +237,8 @@ Decisões tomadas com o assistente (e mantidas após revisão humana):
 - Separar fatos estruturados (SQL) de políticas (RAG), em vez de tudo-embedding
 - Groq free tier + embeddings locais (custo zero para o avaliador)
 - Compactar histórico por TPM, retendo resumo de tools em vez do trace completo
-- Endurecer LGPD na tool (não só no prompt)
+- Endurecer LGPD na tool (dual-factor para `order_id`; não só no prompt)
+- Injetar data/hora + `is_open_now` estruturado em vez de depender só do LLM
 - Evals YAML ligados aos examples para o que o desafio pede julgar
 
 ## Dados

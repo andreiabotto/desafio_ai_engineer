@@ -240,7 +240,10 @@ def test_real_tools_order(temp_db):
                 tool_calls=[
                     {
                         "name": "get_order_status",
-                        "args": {"order_id": 1},
+                        "args": {
+                            "order_id": 1,
+                            "email": "pedro.oliveira@jmail.com",
+                        },
                         "id": "r2",
                         "type": "tool_call",
                     }
@@ -250,11 +253,41 @@ def test_real_tools_order(temp_db):
         ]
     )
     agent = build_agent(llm=llm, tools=[get_order_status])
-    _, messages = run_agent_turn(agent, "Status do pedido 1", history=[])
+    _, messages = run_agent_turn(
+        agent, "Status do pedido 1, email pedro.oliveira@jmail.com", history=[]
+    )
     tool_msgs = [m for m in messages if isinstance(m, ToolMessage)]
     data = json.loads(tool_msgs[0].content)
     assert data["found"] is True
     assert "email" not in data["orders"][0]
+
+
+@pytest.mark.integration
+def test_real_tools_order_id_alone_rejected(temp_db):
+    llm = ScriptedToolLLM(
+        script=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "get_order_status",
+                        "args": {"order_id": 5},
+                        "id": "r2b",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="Por privacidade preciso do e-mail ou telefone da compra além do número do pedido."
+            ),
+        ]
+    )
+    agent = build_agent(llm=llm, tools=[get_order_status])
+    answer, messages = run_agent_turn(agent, "quero ver o pedido 5", history=[])
+    tool_msgs = [m for m in messages if isinstance(m, ToolMessage)]
+    data = json.loads(tool_msgs[0].content)
+    assert data["found"] is False
+    assert "privacidade" in answer.lower() or "e-mail" in answer.lower()
 
 
 @pytest.mark.integration

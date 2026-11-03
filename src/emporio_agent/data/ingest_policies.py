@@ -15,8 +15,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
 from emporio_agent.config import CHROMA_DIR, POLICIES_PDF, Settings, ensure_runtime_dirs, get_settings
+from emporio_agent.logging_setup import get_logger, setup_logging
 
 COLLECTION_NAME = "store_policies"
+logger = get_logger(__name__)
 _embeddings_singleton: HuggingFaceEmbeddings | None = None
 _SUBCHUNK_SPLITTER = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=120)
 
@@ -226,5 +228,6 @@ def policies_ready(chroma_dir: Path | None = None) -> bool:
 
 
 if __name__ == "__main__":
+    setup_logging()
     out = ingest_policies(force=True)
-    print(f"Chroma pronto em {out}")
+    logger.info("Chroma pronto em %s", out)

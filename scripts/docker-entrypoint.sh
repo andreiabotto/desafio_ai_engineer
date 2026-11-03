@@ -7,18 +7,24 @@ run_ingest() {
   python - <<'PY'
 from emporio_agent.data.ingest_csv import db_ready, ingest_csvs
 from emporio_agent.data.ingest_policies import ingest_policies, policies_ready
+from emporio_agent.logging_setup import get_logger, setup_logging
+
+setup_logging()
+logger = get_logger("emporio_agent.entrypoint")
 
 if not db_ready():
-    print("Ingerindo CSVs → SQLite...")
+    logger.info("Ingerindo CSVs → SQLite...")
     ingest_csvs()
+    logger.info("SQLite pronto")
 else:
-    print("SQLite já presente.")
+    logger.info("SQLite já presente")
 
 if not policies_ready():
-    print("Indexando políticas (embeddings locais)...")
+    logger.info("Indexando políticas (embeddings locais)...")
     ingest_policies()
+    logger.info("Índice de políticas pronto")
 else:
-    print("Índice de políticas já presente.")
+    logger.info("Índice de políticas já presente")
 PY
 }
 

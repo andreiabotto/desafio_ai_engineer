@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     store_timezone: str = "America/Campo_Grande"
     max_user_input_chars: int = 4000
+    log_level: str = "INFO"
+
+
+# Horário comercial (índice 0=segunda … 6=domingo): (open_h, open_m, close_h, close_m) ou None
+STORE_WEEKLY_HOURS: dict[int, tuple[int, int, int, int] | None] = {
+    0: (9, 0, 18, 0),
+    1: (9, 0, 18, 0),
+    2: (9, 0, 18, 0),
+    3: (9, 0, 18, 0),
+    4: (9, 0, 18, 0),
+    5: (9, 0, 13, 0),
+    6: None,
+}
+# Feriados (YYYY-MM-DD) — loja fechada; lista mínima / extensível
+STORE_HOLIDAYS: frozenset[str] = frozenset()
 
 
 @lru_cache(maxsize=1)
